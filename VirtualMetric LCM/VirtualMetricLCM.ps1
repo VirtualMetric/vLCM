@@ -167,9 +167,7 @@ param (
 	
     # Name of the Linux VM template. Example: "CentOS 6.2 x64"
     # Template's "Tag" field should contains distro information.
-    # Check the picture for example: http://www.virtualmetric.com/linux/tools/SetLinuxVM/template_tag.png
     # Template's "Custom Properties" field should contains username and password.
-    # Check the picture for example: http://www.virtualmetric.com/linux/tools/SetLinuxVM/template_cp.png
     [Parameter(
         Mandatory = $false,
         HelpMessage = 'Name of the Linux VM template')]

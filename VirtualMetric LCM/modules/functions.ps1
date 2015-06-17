@@ -200,7 +200,7 @@ param (
 
 	if (!$WmiHost)
 	{
-		$CheckWmiObject = Get-WmiObject -Computer "." -Namespace "$NameSpace" -Class "__SystemClass" -EA SilentlyContinue
+		$CheckWmiObject = Get-WmiObject -Computer "." -Namespace "$NameSpace" -Class "MSVM_VirtualSystemManagementService" -EA SilentlyContinue
 		if (!$CheckWmiObject)
 		{
 			$ResultCode = "-1"
@@ -214,7 +214,7 @@ param (
 	}
 	else
 	{
-		$CheckWmiObject = Get-WmiObject -Computer "$WmiHost" -Namespace "$NameSpace" -Class "__SystemClass" -EA SilentlyContinue
+		$CheckWmiObject = Get-WmiObject -Computer "$WmiHost" -Namespace "$NameSpace" -Class "MSVM_VirtualSystemManagementService" -EA SilentlyContinue
 		if (!$CheckWmiObject)
 		{
 			$ResultCode = "-1"
@@ -308,8 +308,18 @@ param (
 			}
 			else
 			{
-				$ResultCode = "0"
-				$ResultMessage = "Wmi Object is not available."
+				$VMManager = Test-WmiObject -NameSpace "root\virtualization\v2" -WmiHost $WmiHost
+				if ($VMManager.ResultCode -eq "1")
+				{
+					$ResultCode = "1"
+					$ResultMessage = "Wmi Provider is available."
+					$VMManager = "HyperV2"
+				}
+				else
+				{
+					$ResultCode = "0"
+					$ResultMessage = "Wmi Object is not available."
+				}
 			}
 		}
 		else
@@ -567,6 +577,112 @@ param (
 				{
 					$ResultCode = "0"
 					$ResultMessage = $_
+				}
+			}
+		}
+		elseif ($VMManager -eq "HyperV2")
+		{
+			if (!$VMHost)
+			{
+				try
+				{
+					$VMStatus = (Get-WmiObject -Computer "." -Namespace "root\virtualization\v2" -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName like '$VMName' AND caption like 'Virtual%' ").EnabledState
+					if (!$VMStatus)
+					{
+						$FailoverCluster = Test-PSModule -Name FailoverClusters
+						if ($FailoverCluster.ResultCode -ne "1")
+						{
+							$ResultCode = "0"
+							$ResultMessage = "VM is not available."
+						}
+						else
+						{
+							if (!$VMCluster)
+							{
+								try
+								{
+									$VMCount = @(Get-Cluster | Get-ClusterGroup | where {$_.Name -match "$VMName"}).Count
+									if ($VMCount -eq "0")
+									{
+										$ResultCode = "0"
+										$ResultMessage = "You have no VM with this name!"
+									}
+									elseif ($VMCount -eq "1")
+									{	
+										$ResultCode = "1"	
+										$ResultMessage = "VM is available!"								
+										$VMConfig = (Get-Cluster | Get-ClusterGroup | where {$_.Name -match "$VMName"})
+										$WmiHost = $VMConfig.OwnerNode.Name
+									}
+									else
+									{
+										$ResultCode = "0"
+										$ResultMessage = "You have multiple VMs with same name!"
+									}
+								}
+								catch
+								{
+									$ResultCode = "0"
+									$ResultMessage = $_
+								}
+							}
+							else
+							{
+								try
+								{
+									$VMCount = @(Get-Cluster $VMCluster | Get-ClusterGroup | where {$_.Name -match "$VMName"}).Count
+									if ($VMCount -eq "0")
+									{
+										$ResultCode = "0"
+										$ResultMessage = "You have no VM with this name!"
+									}
+									elseif ($VMCount -eq "1")
+									{
+										$ResultCode = "1"
+										$ResultMessage = "VM is available!"
+										$VMConfig = (Get-Cluster $VMCluster | Get-ClusterGroup | where {$_.Name -match "$VMName"})
+										$WmiHost = $VMConfig.OwnerNode.Name								
+									}
+									else
+									{
+										$ResultCode = "0"
+										$ResultMessage = "You have multiple VMs with same name!"
+									}
+								}
+								catch
+								{
+									$ResultCode = "0"
+									$ResultMessage = $_
+								}							
+							}
+						}
+					}
+					else
+					{
+						$ResultCode = "1"
+						$ResultMessage = "VM is available!"
+						$WmiHost = "."
+					}
+				}
+				catch
+				{
+					$ResultCode = "0"
+					$ResultMessage = $_
+				}
+			}
+			else
+			{
+				$VMStatus = (Get-WmiObject -Computer "$VMHost" -Namespace "root\virtualization\v2" -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName like '$VMName' AND caption like 'Virtual%' ").EnabledState
+				if (!$VMStatus)
+				{
+					$ResultCode = "0"
+					$ResultMessage = "VM is not available."
+				}
+				else
+				{
+					$ResultCode = "1"
+					$ResultMessage = "VM is available!"
+					$WmiHost = $VMHost
 				}
 			}
 		}
@@ -857,6 +973,28 @@ param (
 				$ResultMessage = "Retrieving VM status..."
 				$VMStatus = (Get-SCVirtualMachine $VMName -VMHost $WmiHost).Status
 				if ($VMStatus -ne "Running")
+				{
+					$ResultCode = "0"
+					$ResultMessage = "VM is not in running state."
+				}
+				else
+				{
+					$ResultCode = "1"
+					$ResultMessage = "VM state is OK!"
+				}
+			}
+			catch
+			{
+				$ResultCode = "0"
+				$ResultMessage = $_
+			}
+		}
+		elseif ($VMManager -eq "HyperV2")
+		{
+			try
+			{
+				$VMStatus = (Get-WmiObject -Computer "$WmiHost" -Namespace "root\virtualization\v2" -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName like '$VMName' AND caption like 'Virtual%' ").EnabledState
+				if ($VMStatus -ne "2")
 				{
 					$ResultCode = "0"
 					$ResultMessage = "VM is not in running state."
@@ -1217,7 +1355,14 @@ param (
 	
 		if ($TestVMState.ResultCode -eq "1")
 		{
-			$VMConf = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName like '$VMName' AND caption like 'Virtual%' "
+			if ($VMManager -eq "HyperV2")
+			{
+				$VMConf = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization\v2" -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName like '$VMName' AND caption like 'Virtual%' "
+			}
+			else
+			{
+				$VMConf = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName like '$VMName' AND caption like 'Virtual%' "
+			}
 			$VSMKB = ($VMConf.getRelated("Msvm_Keyboard") | select-object)
 			$ResultCode = "1"
 			$ResultMessage = "Connected to virtual keyboard."
@@ -1841,42 +1986,85 @@ param (
 		{
 			try
 			{
-				$VMConf = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName like '$VMName' AND caption like 'Virtual%' "
-				$VMSetting = Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "associators of {$($VMConf.__Path)} where resultclass=MSVM_VirtualSystemSettingData" | where-object {$_.instanceID -eq "Microsoft:$($VMConf.name)"}
-				$NetworkAdapter = Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "associators of {$($VMSetting.__Path)}" | where-object {$_.ElementName -eq 'Ethernet Port' -or $_.ElementName -like '*Network Adapter'}
-				if ($NetworkAdapter)
+				if ($VMManager -eq "HyperV2")
 				{
-					$NetworkAdapter = @(Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "associators of {$($VMSetting.__Path)}" | where-object {$_.ElementName -eq 'Ethernet Port' -or $_.ElementName -like '*Network Adapter'})[0]
-					$VirtualNetwork = Get-WmiObject -ComputerName $VMConf.__Server -NameSpace "root\virtualization" -Query "associators OF {$($NetworkAdapter.Connection[0])} where resultclass = Msvm_VirtualSwitch"
-					$VirtualLAN = Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "associators of {$($NetworkAdapter.Connection[0])} where assocClass=msvm_bindsto" | foreach-object {Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "associators of {$_} where assocClass=MSVM_NetWorkElementSettingData"}
-					if ($VirtualNetwork)
+					$VMConf = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization\v2" -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName like '$VMName' AND caption like 'Virtual%' "
+					$VMSetting = Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization\v2" -Query "associators of {$($VMConf.__Path)} where resultclass=MSVM_VirtualSystemSettingData" | where-object {$_.instanceID -eq "Microsoft:$($VMConf.name)"}
+					$NetworkAdapter = Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization\v2" -Query "associators of {$($VMSetting.__Path)}" | where-object {$_.ElementName -eq 'Ethernet Port' -or $_.ElementName -like '*Network Adapter'}
+					if ($NetworkAdapter)
 					{
-						$AdapterNetwork = $VirtualNetwork.ElementName
+						$NetworkAdapter = @(Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization\v2" -Query "associators of {$($VMSetting.__Path)}" | where-object {$_.ElementName -eq 'Ethernet Port' -or $_.ElementName -like '*Network Adapter'})[0]
+						$VirtualNetwork = Get-WmiObject -ComputerName $VMConf.__Server -NameSpace "root\virtualization\v2" -Query "associators OF {$($NetworkAdapter.Connection[0])} where resultclass = Msvm_VirtualSwitch"
+						$VirtualLAN = Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization\v2" -Query "associators of {$($NetworkAdapter.Connection[0])} where assocClass=msvm_bindsto" | foreach-object {Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization\v2" -Query "associators of {$_} where assocClass=MSVM_NetWorkElementSettingData"}
+						if ($VirtualNetwork)
+						{
+							$AdapterNetwork = $VirtualNetwork.ElementName
+						}
+						else
+						{
+							$AdapterNetwork = "Not connected"
+						}
+						$AdapterName = $NetworkAdapter.ElementName
+						$AdapterRAW = $NetworkAdapter.address
+						$AdapterMAC = for ($i = 2 ; $i -le 14 ; $i += 3) { $Result = $AdapterRAW = $AdapterRAW.Insert($i, ':') } ; $AdapterMAC = $Result;
+						$AdapterMacType = if ($NetworkAdapter.StaticMacAddress -eq $true) { Write-Output Static } else { Write-Output Dynamic }
+						if ($VirtualLAN)
+						{
+							$AdapterVLAN = $VirtualLAN.accessVlan
+						}
+						else
+						{
+							$AdapterVLAN = "Trunk Mode"
+						}
+						$AdapterType = $NetworkAdapter.ResourceSubType.Split(" ")[1]	
+						$ResultCode = "1"
+						$ResultMessage = "Network adapter detected."					
 					}
 					else
 					{
-						$AdapterNetwork = "Not connected"
+						$ResultCode = "0"
+						$ResultMessage = "No network adapter detected."
 					}
-					$AdapterName = $NetworkAdapter.ElementName
-					$AdapterRAW = $NetworkAdapter.address
-					$AdapterMAC = for ($i = 2 ; $i -le 14 ; $i += 3) { $Result = $AdapterRAW = $AdapterRAW.Insert($i, ':') } ; $AdapterMAC = $Result;
-					$AdapterMacType = if ($NetworkAdapter.StaticMacAddress -eq $true) { Write-Output Static } else { Write-Output Dynamic }
-					if ($VirtualLAN)
-					{
-						$AdapterVLAN = $VirtualLAN.accessVlan
-					}
-					else
-					{
-						$AdapterVLAN = "Trunk Mode"
-					}
-					$AdapterType = $NetworkAdapter.ResourceSubType.Split(" ")[1]	
-					$ResultCode = "1"
-					$ResultMessage = "Network adapter detected."					
 				}
 				else
 				{
-					$ResultCode = "0"
-					$ResultMessage = "No network adapter detected."
+					$VMConf = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName like '$VMName' AND caption like 'Virtual%' "
+					$VMSetting = Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "associators of {$($VMConf.__Path)} where resultclass=MSVM_VirtualSystemSettingData" | where-object {$_.instanceID -eq "Microsoft:$($VMConf.name)"}
+					$NetworkAdapter = Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "associators of {$($VMSetting.__Path)}" | where-object {$_.ElementName -eq 'Ethernet Port' -or $_.ElementName -like '*Network Adapter'}
+					if ($NetworkAdapter)
+					{
+						$NetworkAdapter = @(Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "associators of {$($VMSetting.__Path)}" | where-object {$_.ElementName -eq 'Ethernet Port' -or $_.ElementName -like '*Network Adapter'})[0]
+						$VirtualNetwork = Get-WmiObject -ComputerName $VMConf.__Server -NameSpace "root\virtualization" -Query "associators OF {$($NetworkAdapter.Connection[0])} where resultclass = Msvm_VirtualSwitch"
+						$VirtualLAN = Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "associators of {$($NetworkAdapter.Connection[0])} where assocClass=msvm_bindsto" | foreach-object {Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "associators of {$_} where assocClass=MSVM_NetWorkElementSettingData"}
+						if ($VirtualNetwork)
+						{
+							$AdapterNetwork = $VirtualNetwork.ElementName
+						}
+						else
+						{
+							$AdapterNetwork = "Not connected"
+						}
+						$AdapterName = $NetworkAdapter.ElementName
+						$AdapterRAW = $NetworkAdapter.address
+						$AdapterMAC = for ($i = 2 ; $i -le 14 ; $i += 3) { $Result = $AdapterRAW = $AdapterRAW.Insert($i, ':') } ; $AdapterMAC = $Result;
+						$AdapterMacType = if ($NetworkAdapter.StaticMacAddress -eq $true) { Write-Output Static } else { Write-Output Dynamic }
+						if ($VirtualLAN)
+						{
+							$AdapterVLAN = $VirtualLAN.accessVlan
+						}
+						else
+						{
+							$AdapterVLAN = "Trunk Mode"
+						}
+						$AdapterType = $NetworkAdapter.ResourceSubType.Split(" ")[1]	
+						$ResultCode = "1"
+						$ResultMessage = "Network adapter detected."					
+					}
+					else
+					{
+						$ResultCode = "0"
+						$ResultMessage = "No network adapter detected."
+					}
 				}
 			}
 			catch
@@ -2067,10 +2255,20 @@ param (
 					if ($AdapterNetwork -ne "Not connected")
 					{
 						# Get Wmi config of virtual machine
-						$VMConf = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName like '$VMName' AND caption like 'Virtual%' "
-						$VMSetting = Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "associators of {$($VMConf.__Path)} where resultclass=MSVM_VirtualSystemSettingData" | Where-Object {$_.instanceID -eq "Microsoft:$($VMConf.name)"}
-						$NetworkAdapter = @(Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "associators of {$($VMSetting.__Path)}" | Where-Object {$_.ElementName -eq 'Ethernet Port' -or $_.ElementName -like '*Network*Adapter*'})[0]
-						$VSMgtSvc = Get-WmiObject -ComputerName $VMSetting.__Server -Namespace "root\virtualization" -Class "MSVM_VirtualSystemManagementService"
+						if ($VMManager -eq "HyperV2")
+						{
+							$VMConf = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization\v2" -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName like '$VMName' AND caption like 'Virtual%' "
+							$VMSetting = Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization\v2" -Query "associators of {$($VMConf.__Path)} where resultclass=MSVM_VirtualSystemSettingData" | Where-Object {$_.instanceID -eq "Microsoft:$($VMConf.name)"}
+							$NetworkAdapter = @(Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization\v2" -Query "associators of {$($VMSetting.__Path)}" | Where-Object {$_.ElementName -eq 'Ethernet Port' -or $_.ElementName -like '*Network*Adapter*'})[0]
+							$VSMgtSvc = Get-WmiObject -ComputerName $VMSetting.__Server -Namespace "root\virtualization\v2" -Class "MSVM_VirtualSystemManagementService"
+						}
+						else
+						{
+							$VMConf = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName like '$VMName' AND caption like 'Virtual%' "
+							$VMSetting = Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "associators of {$($VMConf.__Path)} where resultclass=MSVM_VirtualSystemSettingData" | Where-Object {$_.instanceID -eq "Microsoft:$($VMConf.name)"}
+							$NetworkAdapter = @(Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "associators of {$($VMSetting.__Path)}" | Where-Object {$_.ElementName -eq 'Ethernet Port' -or $_.ElementName -like '*Network*Adapter*'})[0]
+							$VSMgtSvc = Get-WmiObject -ComputerName $VMSetting.__Server -Namespace "root\virtualization" -Class "MSVM_VirtualSystemManagementService"
+						}
 						# Stop virtual machine
 						$StopLinuxVM = $VMConf.RequestStateChange(3)
 						$StopLinuxVM = ProcessWMIJob($StopLinuxVM)
@@ -2080,19 +2278,42 @@ param (
 						# Add synthetic network adapter
 						[String]$GUID=("{"+[System.GUID]::NewGUID().ToString()+"}")
 						[String]$Name=([System.GUID]::NewGUID().ToString())
-						$NetworkAllocation = ((Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "SELECT * FROM MSVM_AllocationCapabilities WHERE ResourceType = '10' AND ResourceSubType = 'Microsoft Synthetic Ethernet Port'").__Path).Replace("\", "\\")
-						$NicRASD = New-Object System.Management.ManagementObject((Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "SELECT * FROM MSVM_SettingsDefineCapabilities WHERE ValueRange=0 AND GroupComponent = '$NetworkAllocation'").PartComponent)
+						if ($VMManager -eq "HyperV2")
+						{
+							$NetworkAllocation = ((Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization\v2" -Query "SELECT * FROM MSVM_AllocationCapabilities WHERE ResourceType = '10' AND ResourceSubType = 'Microsoft Synthetic Ethernet Port'").__Path).Replace("\", "\\")
+							$NicRASD = New-Object System.Management.ManagementObject((Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization\v2" -Query "SELECT * FROM MSVM_SettingsDefineCapabilities WHERE ValueRange=0 AND GroupComponent = '$NetworkAllocation'").PartComponent)
+						}
+						else
+						{
+							$NetworkAllocation = ((Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "SELECT * FROM MSVM_AllocationCapabilities WHERE ResourceType = '10' AND ResourceSubType = 'Microsoft Synthetic Ethernet Port'").__Path).Replace("\", "\\")
+							$NicRASD = New-Object System.Management.ManagementObject((Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "SELECT * FROM MSVM_SettingsDefineCapabilities WHERE ValueRange=0 AND GroupComponent = '$NetworkAllocation'").PartComponent)
+						}
 						$NicRASD.VirtualSystemIdentifiers=@($GUID)
 						$NicRASD.ElementName = "Network Adapter"
 						$AdapterMAC = $AdapterMAC.Replace(":","")
 						$NicRASD.address = $AdapterMAC
 						$NicRASD.StaticMacAddress = $true
-						$VirtualSwitch = Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "Select * From MsVM_VirtualSwitch Where elementname like '$AdapterNetwork' "
-						$SwitchMgtSvc = (Get-WmiObject -ComputerName $VirtualSwitch.__Server -NameSpace "root\virtualization" -Query "Select * From MsVM_VirtualSwitchManagementService")
+						if ($VMManager -eq "HyperV2")
+						{
+							$VirtualSwitch = Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization\v2" -Query "Select * From MsVM_VirtualSwitch Where elementname like '$AdapterNetwork' "
+							$SwitchMgtSvc = (Get-WmiObject -ComputerName $VirtualSwitch.__Server -NameSpace "root\virtualization\v2" -Query "Select * From MsVM_VirtualSwitchManagementService")
+						}
+						else
+						{
+							$VirtualSwitch = Get-WmiObject -ComputerName $VMConf.__Server -Namespace "root\virtualization" -Query "Select * From MsVM_VirtualSwitch Where elementname like '$AdapterNetwork' "
+							$SwitchMgtSvc = (Get-WmiObject -ComputerName $VirtualSwitch.__Server -NameSpace "root\virtualization" -Query "Select * From MsVM_VirtualSwitchManagementService")
+						}
 						$Result = $SwitchMgtSvc.CreateSwitchPort($VirtualSwitch.__Path, $Name, $Name)
 						$NicRASD.connection = @($Result.CreatedSwitchPort)
 						$AddSwitchPort = $VSMgtSvc.AddVirtualSystemResources($VMConf.__Path, @($NicRASD.GetText([System.Management.TextFormat]::WmiDtd20)))
-						$VLANSetting = Get-WmiObject -ComputerName $NicRASD.__Server -Namespace "root\virtualization" -Query "associators of {$($NicRASD.connection[0])} where assocClass=msvm_bindsto" | Foreach-Object {Get-WmiObject -ComputerName $NicRASD.__Server -Namespace "root\virtualization" -Query "associators of {$_} where assocClass=MSVM_NetWorkElementSettingData"}
+						if ($VMManager -eq "HyperV2")
+						{
+							$VLANSetting = Get-WmiObject -ComputerName $NicRASD.__Server -Namespace "root\virtualization\v2" -Query "associators of {$($NicRASD.connection[0])} where assocClass=msvm_bindsto" | Foreach-Object {Get-WmiObject -ComputerName $NicRASD.__Server -Namespace "root\virtualization\v2" -Query "associators of {$_} where assocClass=MSVM_NetWorkElementSettingData"}
+						}
+						else
+						{
+							$VLANSetting = Get-WmiObject -ComputerName $NicRASD.__Server -Namespace "root\virtualization" -Query "associators of {$($NicRASD.connection[0])} where assocClass=msvm_bindsto" | Foreach-Object {Get-WmiObject -ComputerName $NicRASD.__Server -Namespace "root\virtualization" -Query "associators of {$_} where assocClass=MSVM_NetWorkElementSettingData"}
+						}
 						if ($AdapterVLAN -ne "Trunk Mode")
 						{
 							$VLANSetting.accessVlan = $AdapterVLAN
@@ -2491,8 +2712,16 @@ param (
 					Copy-Item $ISOPath -Destination "\\$ShareHost\C$\Windows\System32"
 				}
 				
-				$VMMS = Get-WmiObject -Namespace root\virtualization Msvm_VirtualSystemManagementService -Computername "$WmiHost"
-				$VMConf = Get-WmiObject MSVM_ComputerSystem -filter "ElementName='$VMName'" -Namespace "root\virtualization" -Computername "$WmiHost"
+				if ($VMManager -eq "HyperV2")
+				{
+					$VMMS = Get-WmiObject -Namespace "root\virtualization\v2" -Class "Msvm_VirtualSystemManagementService" -Computername "$WmiHost"
+					$VMConf = Get-WmiObject -Class "MSVM_ComputerSystem" -filter "ElementName='$VMName'" -Namespace "root\virtualization\v2" -Computername "$WmiHost"
+				}
+				else
+				{
+					$VMMS = Get-WmiObject -Namespace "root\virtualization" -Class "Msvm_VirtualSystemManagementService" -Computername "$WmiHost"
+					$VMConf = Get-WmiObject -Class "MSVM_ComputerSystem" -filter "ElementName='$VMName'" -Namespace "root\virtualization" -Computername "$WmiHost"
+				}
 				$VMSetting = $VMConf.getRelated("Msvm_VirtualSystemSettingData") | where {$_.SettingType -eq 3}
 				$DVDDrive = $VMSetting.getRelated("Msvm_ResourceAllocationSettingData") | where{$_.ResourceType -eq 16} | select -first 1
 				if (!$DVDDrive) 
@@ -2518,8 +2747,16 @@ param (
 					{ 
 						$Result1 = $VMMS.RemoveVirtualSystemResources($VMConf, @($DVDRASD)) 
 					}
-					$DVDAllocationCapabilities = (Get-WmiObject -Computername "$WmiHost" -Namespace root\virtualization Msvm_AllocationCapabilities -filter "ResourceType=21 and ResourceSubType='Microsoft Virtual CD/DVD Disk'").__Path.Replace('\', '\\')
-					$DVDSettingsData = [wmi](Get-WmiObject -Computername "$WmiHost" -Namespace root\virtualization Msvm_SettingsDefineCapabilities -filter "GroupComponent='$DVDAllocationCapabilities' and ValueRange=0").PartComponent
+					if ($VMManager -eq "HyperV2")
+					{
+						$DVDAllocationCapabilities = (Get-WmiObject -Computername "$WmiHost" -Namespace "root\virtualization\v2" -Class "Msvm_AllocationCapabilities" -filter "ResourceType=21 and ResourceSubType='Microsoft Virtual CD/DVD Disk'").__Path.Replace('\', '\\')
+						$DVDSettingsData = [wmi](Get-WmiObject -Computername "$WmiHost" -Namespace "root\virtualization\v2" -Class "Msvm_SettingsDefineCapabilities" -filter "GroupComponent='$DVDAllocationCapabilities' and ValueRange=0").PartComponent
+					}
+					else
+					{
+						$DVDAllocationCapabilities = (Get-WmiObject -Computername "$WmiHost" -Namespace "root\virtualization" -Class "Msvm_AllocationCapabilities" -filter "ResourceType=21 and ResourceSubType='Microsoft Virtual CD/DVD Disk'").__Path.Replace('\', '\\')
+						$DVDSettingsData = [wmi](Get-WmiObject -Computername "$WmiHost" -Namespace "root\virtualization" -Class "Msvm_SettingsDefineCapabilities" -filter "GroupComponent='$DVDAllocationCapabilities' and ValueRange=0").PartComponent
+					}
 					$ISOPath = "C:\Windows\System32\" + $ScriptPrefix + ".iso"
 					$DVDSettingsData.Connection = @($ISOPath)
 					$DVDSettingsData.Parent = $DVDDrive.__Path
@@ -2670,8 +2907,16 @@ param (
 	{	
 		try 
 		{	
-			$VMMS = Get-WmiObject -Namespace root\virtualization Msvm_VirtualSystemManagementService -Computername "$WmiHost"
-			$VMConf = Get-WmiObject MSVM_ComputerSystem -filter "ElementName='$VMName'" -Namespace "root\virtualization" -Computername "$WmiHost"
+			if ($VMManager -eq "HyperV2")
+			{
+				$VMMS = Get-WmiObject -Namespace "root\virtualization\v2" -Class "Msvm_VirtualSystemManagementService" -Computername "$WmiHost"
+				$VMConf = Get-WmiObject MSVM_ComputerSystem -filter "ElementName='$VMName'" -Namespace "root\virtualization\v2" -Computername "$WmiHost"
+			}
+			else
+			{
+				$VMMS = Get-WmiObject -Namespace "root\virtualization" -Class "Msvm_VirtualSystemManagementService" -Computername "$WmiHost"
+				$VMConf = Get-WmiObject MSVM_ComputerSystem -filter "ElementName='$VMName'" -Namespace "root\virtualization" -Computername "$WmiHost"
+			}
 			$VMSetting = $VMConf.getRelated("Msvm_VirtualSystemSettingData") | where {$_.SettingType -eq 3}
 			$DVDDrive = $VMSetting.getRelated("Msvm_ResourceAllocationSettingData") | where {$_.ResourceType -eq 16} | select -first 1
 			if (!$DVDDrive) 
@@ -2855,10 +3100,19 @@ param (
 		{	
 			$xRes = 8
 			$yRes = 8
-			$Assembly = [System.Reflection.Assembly]::LoadWithPartialName("System.Drawing") 
-			$VMMS = Get-WmiObject -Namespace root\virtualization Msvm_VirtualSystemManagementService -Computername "$WmiHost"	
-			$VMConf = Get-WmiObject MSVM_ComputerSystem -filter "ElementName='$VMName'" -Namespace "root\virtualization" -Computername "$WmiHost"
-			$VMSetting = Get-WmiObject -Namespace "root\virtualization" -Query "Associators of {$VMConf} Where ResultClass=Msvm_VirtualSystemSettingData AssocClass=Msvm_SettingsDefineState" -ComputerName "$WmiHost"
+			$Assembly = [System.Reflection.Assembly]::LoadWithPartialName("System.Drawing")
+			if ($VMManager -eq "HyperV2")
+			{
+				$VMMS = Get-WmiObject -Namespace "root\virtualization\v2" -Class "Msvm_VirtualSystemManagementService" -Computername "$WmiHost"
+				$VMConf = Get-WmiObject MSVM_ComputerSystem -filter "ElementName='$VMName'" -Namespace "root\virtualization\v2" -Computername "$WmiHost"
+				$VMSetting = Get-WmiObject -Namespace "root\virtualization\v2" -Query "Associators of {$VMConf} Where ResultClass=Msvm_VirtualSystemSettingData AssocClass=Msvm_SettingsDefineState" -ComputerName "$WmiHost"
+			}
+			else
+			{
+				$VMMS = Get-WmiObject -Namespace "root\virtualization" -Class "Msvm_VirtualSystemManagementService" -Computername "$WmiHost"
+				$VMConf = Get-WmiObject MSVM_ComputerSystem -filter "ElementName='$VMName'" -Namespace "root\virtualization" -Computername "$WmiHost"
+				$VMSetting = Get-WmiObject -Namespace "root\virtualization" -Query "Associators of {$VMConf} Where ResultClass=Msvm_VirtualSystemSettingData AssocClass=Msvm_SettingsDefineState" -ComputerName "$WmiHost"
+			}			
 			$RawImageData = $VMMS.GetVirtualSystemThumbnailImage($VMSetting, "$xRes", "$yRes")
 			$ImageData = $RawImageData.ImageData
 			$ResultCode = "1"
@@ -3574,8 +3828,16 @@ param (
 				}
 				$CimObj
 			}
-			$VMConf = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName like '$VMName' AND caption like 'Virtual%' "
-			$KVPData = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "Associators of {$VMConf} Where AssocClass=Msvm_SystemDevice ResultClass=Msvm_KvpExchangeComponent"
+			if ($VMManager -eq "HyperV2")
+			{
+				$VMConf = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization\v2" -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName like '$VMName' AND caption like 'Virtual%' "
+				$KVPData = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization\v2" -Query "Associators of {$VMConf} Where AssocClass=Msvm_SystemDevice ResultClass=Msvm_KvpExchangeComponent"
+			}
+			else
+			{
+				$VMConf = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName like '$VMName' AND caption like 'Virtual%' "
+				$KVPData = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "Associators of {$VMConf} Where AssocClass=Msvm_SystemDevice ResultClass=Msvm_KvpExchangeComponent"
+			}
 			$KVPExport = $KVPData.GuestIntrinsicExchangeItems
 			if ($KVPExport)
 			{
@@ -3844,7 +4106,39 @@ param (
 				$FailoverCluster = Test-PSModule -Name FailoverClusters
 				if ($FailoverCluster.ResultCode -ne "1")
 				{
-					if ($VMManager -eq "HyperV")
+					if ($VMManager -eq "HyperV2")
+					{
+						$VMHost = hostname
+						$ResultCode = "1"
+						$ResultMessage = "VM host detected."
+						if ($OutXML)
+						{
+							$xml = "<?xml version=""1.0"" encoding=""utf-8""?>`n"
+							$xml += "<Result>`n"
+							$xml += " <Code>$ResultCode</Code>`n"
+							$xml += " <Message>$ResultMessage</Message>`n"
+						}
+						if (!$OutXML)
+						{
+							$Properties = New-Object Psobject
+							$Properties | Add-Member Noteproperty ResultCode $ResultCode
+							$Properties | Add-Member Noteproperty ResultMessage $ResultMessage
+							$Properties | Add-Member Noteproperty VMHost $VMHost
+							Write-Output $Properties
+						}
+						else
+						{
+							$xml += " <OperationResult>`n"
+							$xml += "  <VMHost>$VMHost</VMHost>`n"
+							$xml += " </OperationResult>`n"
+						}
+						if ($OutXML)
+						{
+							$xml += "</Result>`n"
+							$xml
+						}
+					}
+					elseif ($VMManager -eq "HyperV")
 					{
 						$VMHost = hostname
 						$ResultCode = "1"
@@ -3902,7 +4196,39 @@ param (
 							$ClusterNodes = (Get-Cluster -EA SilentlyContinue | Get-ClusterNode)
 							if (!$ClusterNodes)
 							{
-								if ($VMManager -eq "HyperV")
+								if ($VMManager -eq "HyperV2")
+								{
+									$VMHost = hostname
+									$ResultCode = "1"
+									$ResultMessage = "VM host detected."
+									if ($OutXML)
+									{
+										$xml = "<?xml version=""1.0"" encoding=""utf-8""?>`n"
+										$xml += "<Result>`n"
+										$xml += " <Code>$ResultCode</Code>`n"
+										$xml += " <Message>$ResultMessage</Message>`n"
+									}
+									if (!$OutXML)
+									{
+										$Properties = New-Object Psobject
+										$Properties | Add-Member Noteproperty ResultCode $ResultCode
+										$Properties | Add-Member Noteproperty ResultMessage $ResultMessage
+										$Properties | Add-Member Noteproperty VMHost $VMHost
+										Write-Output $Properties
+									}
+									else
+									{
+										$xml += " <OperationResult>`n"
+										$xml += "  <VMHost>$VMHost</VMHost>`n"
+										$xml += " </OperationResult>`n"
+									}
+									if ($OutXML)
+									{
+										$xml += "</Result>`n"
+										$xml
+									}
+								}
+								elseif ($VMManager -eq "HyperV")
 								{
 									$VMHost = hostname
 									$ResultCode = "1"
@@ -4479,7 +4805,14 @@ param (
 					{
 						$WmiHost = $VMHost
 					}
-					$VMs = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem" | Where {$_.EnabledState -eq "2"}
+					if ($VMManager -eq "HyperV2")
+					{
+						$VMs = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization\v2" -Query "SELECT * FROM Msvm_ComputerSystem" | Where {$_.EnabledState -eq "2"}
+					}
+					else
+					{
+						$VMs = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem" | Where {$_.EnabledState -eq "2"}
+					}
 					
 					if (!$VMs)
 					{
@@ -4610,7 +4943,14 @@ param (
 									{
 										$WmiHost = $VMHost
 									}
-									$VMs = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem" | Where {$_.EnabledState -eq "2"}
+									if ($VMManager -eq "HyperV2")
+									{
+										$VMs = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization\v2" -Query "SELECT * FROM Msvm_ComputerSystem" | Where {$_.EnabledState -eq "2"}
+									}
+									else
+									{
+										$VMs = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem" | Where {$_.EnabledState -eq "2"}
+									}
 									
 									if (!$VMs)
 									{
@@ -4727,7 +5067,14 @@ param (
 									foreach ($ClusterNode in $ClusterNodes)
 									{
 										$WmiHost = $ClusterNode.Name
-										$VMs = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem" | Where {$_.EnabledState -eq "2"}
+										if ($VMManager -eq "HyperV2")
+										{
+											$VMs = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization\v2" -Query "SELECT * FROM Msvm_ComputerSystem" | Where {$_.EnabledState -eq "2"}
+										}
+										else
+										{
+											$VMs = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem" | Where {$_.EnabledState -eq "2"}
+										}
 										
 										if (!$VMs)
 										{
@@ -4865,7 +5212,14 @@ param (
 								foreach ($ClusterNode in $ClusterNodes)
 								{
 									$WmiHost = $ClusterNode.Name
-									$VMs = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem" | Where {$_.EnabledState -eq "2"}
+									if ($VMManager -eq "HyperV2")
+									{
+										$VMs = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization\v2" -Query "SELECT * FROM Msvm_ComputerSystem" | Where {$_.EnabledState -eq "2"}
+									}
+									else
+									{
+										$VMs = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem" | Where {$_.EnabledState -eq "2"}
+									}
 									
 									if (!$VMs)
 									{
@@ -5001,7 +5355,14 @@ param (
 						try
 						{
 							$WmiHost = $VMHost
-							$VMs = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem" | Where {$_.EnabledState -eq "2"}
+							if ($VMManager -eq "HyperV2")
+							{
+								$VMs = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization\v2" -Query "SELECT * FROM Msvm_ComputerSystem" | Where {$_.EnabledState -eq "2"}
+							}
+							else
+							{
+								$VMs = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem" | Where {$_.EnabledState -eq "2"}
+							}
 							
 							if (!$VMs)
 							{
