@@ -2490,7 +2490,7 @@ param (
 	$Source = "$UnattendedScriptPath\$ScriptPrefix"
 	
 	# ISO Title
-    [string]$Title = "SetLinuxVM" 
+    [string]$Title = "VirtualMetricLCM" 
 
 	($CP = New-Object System.CodeDom.Compiler.CompilerParameters).CompilerOptions = "/unsafe" 
 	if (!("ISOFile" -as [Type])) 
@@ -3511,7 +3511,7 @@ Function New-RequirementCheck {
 <#
     .SYNOPSIS
      
-        Function to check requirements for SetLinuxVM
+        Function to check requirements for VirtualMetricLCM
 
     .EXAMPLE
      
@@ -3605,7 +3605,7 @@ param (
 		if ($TestWmiHost.ResultCode -eq "1")
 		{		
 			# Check virtual machine state
-			# SetLinuxVM can not manage virtual machine if VM is stopped.
+			# VirtualMetricLCM can not manage virtual machine if VM is stopped.
 			$TestVMState = Test-VMState -VMName $VMName -VMManager $VMManager -WmiHost $WmiHost
 			
 			if ($TestVMState.ResultCode -eq "1")
@@ -3683,7 +3683,7 @@ Function Get-UnattendedScriptPath {
 <#
     .SYNOPSIS
      
-        Function to get unattended script path of SetLinuxVM
+        Function to get unattended script path of VirtualMetricLCM
 
     .EXAMPLE
      
@@ -3718,11 +3718,11 @@ param (
 	$UnattendedScriptPathTest = Test-Path -Path "$UnattendedScriptPath"
 	if (!$UnattendedScriptPathTest)
 	{
-		$UnattendedScriptPath = "C:\Windows\System32\WindowsPowerShell\v1.0\Modules\SetLinuxVM\scripts"
+		$UnattendedScriptPath = "C:\Windows\System32\WindowsPowerShell\v1.0\Modules\VirtualMetricLCM\scripts"
 		$UnattendedScriptPathTest = Test-Path -Path "$UnattendedScriptPath"
 		if (!$UnattendedScriptPathTest)
 		{
-			$UnattendedScriptPath = "C:\Windows\SysWOW64\WindowsPowerShell\v1.0\Modules\SetLinuxVM\scripts"
+			$UnattendedScriptPath = "C:\Windows\SysWOW64\WindowsPowerShell\v1.0\Modules\VirtualMetricLCM\scripts"
 			$UnattendedScriptPathTest = Test-Path -Path "$UnattendedScriptPath"
 			if (!$UnattendedScriptPathTest)
 			{
@@ -5774,7 +5774,7 @@ Function New-TimeStamp {
 	Write-Output $yr$mo$dy$hr$mi$sd
 }
 
-function Confirm-SetLinuxVMWAPrivileges {
+function Confirm-VirtualMetricLCMWAPrivileges {
 
 <#
     .SYNOPSIS
@@ -5783,7 +5783,7 @@ function Confirm-SetLinuxVMWAPrivileges {
 
     .EXAMPLE
      
-        Confirm-SetLinuxVMWAPrivileges
+        Confirm-VirtualMetricLCMWAPrivileges
 		
 #>
 
