@@ -2732,60 +2732,54 @@ param (
 				
 				if ($VMManager -eq "HyperV2")
 				{
-					$VMMS = Get-WmiObject -Namespace "root\virtualization\v2" -Class "Msvm_VirtualSystemManagementService" -Computername "$WmiHost"
-					$VMConf = Get-WmiObject -Class "MSVM_ComputerSystem" -filter "ElementName='$VMName'" -Namespace "root\virtualization\v2" -Computername "$WmiHost"
+					$SaveVM = Get-VM -ComputerName $WmiHost -Name "$VMName"  | Save-VM
+					$MountImage = Get-VM -ComputerName $WmiHost -Name "$VMName" | Get-VMDvdDrive | Set-VMDvdDrive -Path $ISOPath
+					$StartVM = Get-VM -ComputerName $WmiHost -Name "$VMName"  | Start-VM
+					$ResultCode = "1"
+					$ResultMessage = "Linux image file is mounted."
 				}
 				else
 				{
 					$VMMS = Get-WmiObject -Namespace "root\virtualization" -Class "Msvm_VirtualSystemManagementService" -Computername "$WmiHost"
 					$VMConf = Get-WmiObject -Class "MSVM_ComputerSystem" -filter "ElementName='$VMName'" -Namespace "root\virtualization" -Computername "$WmiHost"
-				}
-				$VMSetting = $VMConf.getRelated("Msvm_VirtualSystemSettingData") | where {$_.SettingType -eq 3}
-				$DVDDrive = $VMSetting.getRelated("Msvm_ResourceAllocationSettingData") | where{$_.ResourceType -eq 16} | select -first 1
-				if (!$DVDDrive) 
-				{
-					$ResultCode = "0"
-					$ResultMessage = "No DVD drive exist on that virtual machine."
-				}
-				else
-				{
-					$ResultCode = "1"
-					$ResultMessage = "DVD drive is available."
-				}
-				
-				if ($ResultCode -eq "1")
-				{
-					# Suspend virtual machine
-					$SuspendLinuxVM = $VMConf.RequestStateChange(32769)
-					$SuspendLinuxVM = ProcessWMIJob($SuspendLinuxVM)
-					Start-Sleep 5
-				
-					$DVDRASD = $VMSetting.getRelated("Msvm_ResourceAllocationSettingData") | where {$_.Parent -eq $DVDDrive.__Path}
-					if ($DVDRASD) 
-					{ 
-						$Result1 = $VMMS.RemoveVirtualSystemResources($VMConf, @($DVDRASD)) 
-					}
-					if ($VMManager -eq "HyperV2")
+
+					$VMSetting = $VMConf.getRelated("Msvm_VirtualSystemSettingData") | where {$_.SettingType -eq 3}
+					$DVDDrive = $VMSetting.getRelated("Msvm_ResourceAllocationSettingData") | where{$_.ResourceType -eq 16} | select -first 1
+					if (!$DVDDrive) 
 					{
-						$DVDAllocationCapabilities = (Get-WmiObject -Computername "$WmiHost" -Namespace "root\virtualization\v2" -Class "Msvm_AllocationCapabilities" -filter "ResourceType=21 and ResourceSubType='Microsoft Virtual CD/DVD Disk'").__Path.Replace('\', '\\')
-						$DVDSettingsData = [wmi](Get-WmiObject -Computername "$WmiHost" -Namespace "root\virtualization\v2" -Class "Msvm_SettingsDefineCapabilities" -filter "GroupComponent='$DVDAllocationCapabilities' and ValueRange=0").PartComponent
+						$ResultCode = "0"
+						$ResultMessage = "No DVD drive exist on that virtual machine."
 					}
 					else
 					{
+						$ResultCode = "1"
+						$ResultMessage = "DVD drive is available."
+					}
+				
+					if ($ResultCode -eq "1")
+					{
+						# Suspend virtual machine
+						$SuspendLinuxVM = $VMConf.RequestStateChange(32769)
+						$SuspendLinuxVM = ProcessWMIJob($SuspendLinuxVM)
+						Start-Sleep 5
+				
+						$DVDRASD = $VMSetting.getRelated("Msvm_ResourceAllocationSettingData") | where {$_.Parent -eq $DVDDrive.__Path}
+						if ($DVDRASD) { $Result1 = $VMMS.RemoveVirtualSystemResources($VMConf, @($DVDRASD)) }
 						$DVDAllocationCapabilities = (Get-WmiObject -Computername "$WmiHost" -Namespace "root\virtualization" -Class "Msvm_AllocationCapabilities" -filter "ResourceType=21 and ResourceSubType='Microsoft Virtual CD/DVD Disk'").__Path.Replace('\', '\\')
 						$DVDSettingsData = [wmi](Get-WmiObject -Computername "$WmiHost" -Namespace "root\virtualization" -Class "Msvm_SettingsDefineCapabilities" -filter "GroupComponent='$DVDAllocationCapabilities' and ValueRange=0").PartComponent
-					}
-					$ISOPath = "C:\Windows\System32\" + $ScriptPrefix + ".iso"
-					$DVDSettingsData.Connection = @($ISOPath)
-					$DVDSettingsData.Parent = $DVDDrive.__Path
-					$Result2 = $VMMS.AddVirtualSystemResources($VMConf, $DVDSettingsData.GetText(1))
-					$ResultCode = "1"
-					$ResultMessage = "Linux image file is mounted."
+
+						$ISOPath = "C:\Windows\System32\" + $ScriptPrefix + ".iso"
+						$DVDSettingsData.Connection = @($ISOPath)
+						$DVDSettingsData.Parent = $DVDDrive.__Path
+						$Result2 = $VMMS.AddVirtualSystemResources($VMConf, $DVDSettingsData.GetText(1))
+						$ResultCode = "1"
+						$ResultMessage = "Linux image file is mounted."
 					
-					# Start virtual machine
-					$StartLinuxVM = $VMConf.RequestStateChange(2)
-					$StartLinuxVM = ProcessWMIJob($StartLinuxVM)
-					Start-Sleep 5
+						# Start virtual machine
+						$StartLinuxVM = $VMConf.RequestStateChange(2)
+						$StartLinuxVM = ProcessWMIJob($StartLinuxVM)
+						Start-Sleep 5
+					}
 				}
 			}
 		}
