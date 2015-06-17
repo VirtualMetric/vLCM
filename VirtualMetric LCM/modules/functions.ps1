@@ -919,7 +919,7 @@ param (
 	
 	if ($ResultCode -eq "1")
 	{
-		if (!$WmiHost) 
+		if (!$WmiHost)
 		{ 
 			$TestWmiHost = Get-WmiHost -VMName $VMName -VMHost $VMHost -VMCluster $VMCluster -VMMServer $VMMServer -VMManager $VMManager
 			if ($TestWmiHost.ResultCode -eq "1")
@@ -2649,6 +2649,24 @@ param (
 		$ErrorActionPreference = "silentlycontinue"
 	}
 
+	if (!$VMManager) 
+	{ 
+		$TestVMManager = Test-VMManager -VMHost $VMHost -VMMServer $VMMServer
+		
+		if ($TestVMManager.ResultCode -eq "1")
+		{
+			$VMManager = $TestVMManager.VMManager
+		}
+		
+		$ResultCode = $TestVMManager.ResultCode
+		$ResultMessage = $TestVMManager.ResultMessage
+	}
+	else
+	{
+		$ResultCode = "1"
+		$ResultMessage = "VM Manager is available."
+	}
+
 	if (!$WmiHost) 
 	{ 
 		$TestWmiHost = Get-WmiHost -VMName $VMName -VMHost $VMHost -VMCluster $VMCluster -VMMServer $VMMServer -VMManager $VMManager
@@ -2881,6 +2899,24 @@ param (
 	{
 		$ErrorActionPreference = "silentlycontinue"
 	}
+
+	if (!$VMManager) 
+	{ 
+		$TestVMManager = Test-VMManager -VMHost $VMHost -VMMServer $VMMServer
+		
+		if ($TestVMManager.ResultCode -eq "1")
+		{
+			$VMManager = $TestVMManager.VMManager
+		}
+		
+		$ResultCode = $TestVMManager.ResultCode
+		$ResultMessage = $TestVMManager.ResultMessage
+	}
+	else
+	{
+		$ResultCode = "1"
+		$ResultMessage = "VM Manager is available."
+	}
 	
 	if (!$WmiHost) 
 	{ 
@@ -3071,6 +3107,24 @@ param (
 	else
 	{
 		$ErrorActionPreference = "silentlycontinue"
+	}
+
+	if (!$VMManager) 
+	{ 
+		$TestVMManager = Test-VMManager -VMHost $VMHost -VMMServer $VMMServer
+		
+		if ($TestVMManager.ResultCode -eq "1")
+		{
+			$VMManager = $TestVMManager.VMManager
+		}
+		
+		$ResultCode = $TestVMManager.ResultCode
+		$ResultMessage = $TestVMManager.ResultMessage
+	}
+	else
+	{
+		$ResultCode = "1"
+		$ResultMessage = "VM Manager is available."
 	}
 	
 	if (!$WmiHost) 
@@ -3789,6 +3843,24 @@ param (
 	{
 		$ErrorActionPreference = "silentlycontinue"
 	}
+
+	if (!$VMManager) 
+	{ 
+		$TestVMManager = Test-VMManager -VMHost $VMHost -VMMServer $VMMServer
+			
+		if ($TestVMManager.ResultCode -eq "1")
+		{
+			$VMManager = $TestVMManager.VMManager
+		}
+			
+		$ResultCode = $TestVMManager.ResultCode
+		$ResultMessage = $TestVMManager.ResultMessage
+	}
+	else
+	{
+		$ResultCode = "1"
+		$ResultMessage = "VM Manager is available."
+	}
 	
 	if (!$WmiHost) 
 	{ 
@@ -3813,62 +3885,109 @@ param (
 	
 	if ($ResultCode -eq "1")
 	{
-		try
+		if ($VMManager -eq "HyperV2")
 		{
-			filter Import-CimXml
+			try
 			{
-				$CimXml = [Xml]$_
-				$CimObj = New-Object -TypeName System.Object
-				foreach ($CimProperty in $CimXml.SelectNodes("/INSTANCE/PROPERTY"))
+				filter Import-CimXml
 				{
-					if ($CimProperty.Name -eq "Name" -or $CimProperty.Name -eq "Data")
+					$CimXml = [Xml]$_
+					$CimObj = New-Object -TypeName System.Object
+					foreach ($CimProperty in $CimXml.SelectNodes("/INSTANCE/PROPERTY"))
 					{
-						$CimObj | Add-Member -MemberType NoteProperty -Name $CimProperty.NAME -Value $CimProperty.VALUE
+						if ($CimProperty.Name -eq "Name" -or $CimProperty.Name -eq "Data")
+						{
+							$CimObj | Add-Member -MemberType NoteProperty -Name $CimProperty.NAME -Value $CimProperty.VALUE
+						}
 					}
+					$CimObj
 				}
-				$CimObj
+				$VMConf = Get-WmiObject -ComputerName $WmiHost -Namespace "root\virtualization\v2" -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName like '$VMName' AND caption like 'Virtual%' "
+				$KVPData = Get-WmiObject -ComputerName $WmiHost -Namespace "root\virtualization\v2" -Query "Associators of {$VMConf} Where AssocClass=Msvm_SystemDevice ResultClass=Msvm_KvpExchangeComponent"
+				$KVPExport = $KVPData.GuestIntrinsicExchangeItems
+				if ($KVPExport)
+				{
+					$KVPExport = $KVPExport | Import-CimXml
+					$OSName = ($KVPExport | where {$_.Name -eq "OSName"}).Data
+					$OSVersion = ($KVPExport | where {$_.Name -eq "OSVersion"}).Data
+					$ProcessorArchitecture = ($KVPExport | where {$_.Name -eq "ProcessorArchitecture"}).Data
+					$Hostname = ($KVPExport | where {$_.Name -eq "FullyQualifiedDomainName"}).Data
+					$NetworkAddressIPv4 = ($KVPExport | where {$_.Name -eq "NetworkAddressIPv4"}).Data
+					$NetworkAddressIPv6 = ($KVPExport | where {$_.Name -eq "NetworkAddressIPv6"}).Data
+					$IntegrationServicesVersion = ($KVPExport | where {$_.Name -eq "IntegrationServicesVersion"}).Data
+					$ResultCode = "1"
+					$ResultMessage = "VM information is detected."
+				}
+				else
+				{
+					$OSName = $Null
+					$OSVersion = $Null
+					$ProcessorArchitecture = $Null
+					$Hostname = $Null
+					$NetworkAddressIPv4 = $Null
+					$NetworkAddressIPv6 = $Null
+					$IntegrationServicesVersion = $Null
+					$ResultCode = "-1"
+					$ResultMessage = "VM information is not available."
+				}
 			}
-			if ($VMManager -eq "HyperV2")
+			catch
 			{
-				$VMConf = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization\v2" -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName like '$VMName' AND caption like 'Virtual%' "
-				$KVPData = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization\v2" -Query "Associators of {$VMConf} Where AssocClass=Msvm_SystemDevice ResultClass=Msvm_KvpExchangeComponent"
-			}
-			else
-			{
-				$VMConf = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName like '$VMName' AND caption like 'Virtual%' "
-				$KVPData = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "Associators of {$VMConf} Where AssocClass=Msvm_SystemDevice ResultClass=Msvm_KvpExchangeComponent"
-			}
-			$KVPExport = $KVPData.GuestIntrinsicExchangeItems
-			if ($KVPExport)
-			{
-				$KVPExport = $KVPExport | Import-CimXml
-				$OSName = ($KVPExport | where {$_.Name -eq "OSName"}).Data
-				$OSVersion = ($KVPExport | where {$_.Name -eq "OSVersion"}).Data
-				$ProcessorArchitecture = ($KVPExport | where {$_.Name -eq "ProcessorArchitecture"}).Data
-				$Hostname = ($KVPExport | where {$_.Name -eq "FullyQualifiedDomainName"}).Data
-				$NetworkAddressIPv4 = ($KVPExport | where {$_.Name -eq "NetworkAddressIPv4"}).Data
-				$NetworkAddressIPv6 = ($KVPExport | where {$_.Name -eq "NetworkAddressIPv6"}).Data
-				$IntegrationServicesVersion = ($KVPExport | where {$_.Name -eq "IntegrationServicesVersion"}).Data
-				$ResultCode = "1"
-				$ResultMessage = "VM information is detected."
-			}
-			else
-			{
-				$OSName = $Null
-				$OSVersion = $Null
-				$ProcessorArchitecture = $Null
-				$Hostname = $Null
-				$NetworkAddressIPv4 = $Null
-				$NetworkAddressIPv6 = $Null
-				$IntegrationServicesVersion = $Null
-				$ResultCode = "-1"
-				$ResultMessage = "VM information is not available."
+				$ResultCode = "0"
+				$ResultMessage = $_
 			}
 		}
-		catch
+		else
 		{
-			$ResultCode = "0"
-			$ResultMessage = $_
+			try
+			{
+				filter Import-CimXml
+				{
+					$CimXml = [Xml]$_
+					$CimObj = New-Object -TypeName System.Object
+					foreach ($CimProperty in $CimXml.SelectNodes("/INSTANCE/PROPERTY"))
+					{
+						if ($CimProperty.Name -eq "Name" -or $CimProperty.Name -eq "Data")
+						{
+							$CimObj | Add-Member -MemberType NoteProperty -Name $CimProperty.NAME -Value $CimProperty.VALUE
+						}
+					}
+					$CimObj
+				}
+				$VMConf = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "SELECT * FROM Msvm_ComputerSystem WHERE ElementName like '$VMName' AND caption like 'Virtual%' "
+				$KVPData = Get-WmiObject -ComputerName "$WmiHost" -Namespace "root\virtualization" -Query "Associators of {$VMConf} Where AssocClass=Msvm_SystemDevice ResultClass=Msvm_KvpExchangeComponent"
+				$KVPExport = $KVPData.GuestIntrinsicExchangeItems
+				if ($KVPExport)
+				{
+					$KVPExport = $KVPExport | Import-CimXml
+					$OSName = ($KVPExport | where {$_.Name -eq "OSName"}).Data
+					$OSVersion = ($KVPExport | where {$_.Name -eq "OSVersion"}).Data
+					$ProcessorArchitecture = ($KVPExport | where {$_.Name -eq "ProcessorArchitecture"}).Data
+					$Hostname = ($KVPExport | where {$_.Name -eq "FullyQualifiedDomainName"}).Data
+					$NetworkAddressIPv4 = ($KVPExport | where {$_.Name -eq "NetworkAddressIPv4"}).Data
+					$NetworkAddressIPv6 = ($KVPExport | where {$_.Name -eq "NetworkAddressIPv6"}).Data
+					$IntegrationServicesVersion = ($KVPExport | where {$_.Name -eq "IntegrationServicesVersion"}).Data
+					$ResultCode = "1"
+					$ResultMessage = "VM information is detected."
+				}
+				else
+				{
+					$OSName = $Null
+					$OSVersion = $Null
+					$ProcessorArchitecture = $Null
+					$Hostname = $Null
+					$NetworkAddressIPv4 = $Null
+					$NetworkAddressIPv6 = $Null
+					$IntegrationServicesVersion = $Null
+					$ResultCode = "-1"
+					$ResultMessage = "VM information is not available."
+				}
+			}
+			catch
+			{
+				$ResultCode = "0"
+				$ResultMessage = $_
+			}
 		}
 	}
 
